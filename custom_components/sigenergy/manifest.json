@@ -1,0 +1,13 @@
+{
+  "manifest_version": 1,
+  "domain": "sigenergy",
+  "name": "Sigenergy",
+  "codeowners": ["@ssimpson"],
+  "config_flow": true,
+  "documentation": "https://developer.sigencloud.com/user/api/document/17",
+  "requirements": [],
+  "version": "0.1.0",
+  "issue_tracker": "https://github.com/ssimpson/home-assistant-sigenergy/issues",
+  "is_class_codeowner": false,
+  "iot_class": "cloud_polling"
+}

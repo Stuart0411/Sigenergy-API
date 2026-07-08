@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sigenergy Account",
+        "description": "Configure your Sigenergy account. For API documentation, visit: https://developer.sigencloud.com/user/api/document/17",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "account_id": "Account ID (optional)",
+          "api_key": "API Key (optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid username or password",
+      "cannot_connect": "Failed to connect to Sigenergy API",
+      "unknown": "Unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "This account is already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "system_power": {
+        "name": "System Power"
+      },
+      "system_soc": {
+        "name": "System State of Charge"
+      },
+      "battery_power": {
+        "name": "Battery Power"
+      },
+      "grid_power": {
+        "name": "Grid Power"
+      },
+      "pv_power": {
+        "name": "PV Power"
+      },
+      "load_power": {
+        "name": "Load Power"
+      }
+    },
+    "switch": {
+      "charger_status": {
+        "name": "Charger Status"
+      }
+    },
+    "binary_sensor": {
+      "system_online": {
+        "name": "System Online"
+      }
+    }
+  },
+  "services": {
+    "set_charging_profile": {
+      "name": "Set Charging Profile",
+      "description": "Set the charging profile for a charger",
+      "fields": {
+        "system_id": {
+          "name": "System ID",
+          "description": "The system ID"
+        },
+        "device_id": {
+          "name": "Device ID",
+          "description": "The device ID"
+        },
+        "max_power": {
+          "name": "Max Power",
+          "description": "Maximum charging power in watts"
+        }
+      }
+    },
+    "start_charging": {
+      "name": "Start Charging",
+      "description": "Start charging a device",
+      "fields": {
+        "system_id": {
+          "name": "System ID"
+        },
+        "device_id": {
+          "name": "Device ID"
+        }
+      }
+    },
+    "stop_charging": {
+      "name": "Stop Charging",
+      "description": "Stop charging a device",
+      "fields": {
+        "system_id": {
+          "name": "System ID"
+        },
+        "device_id": {
+          "name": "Device ID"
+        }
+      }
+    }
+  }
+}

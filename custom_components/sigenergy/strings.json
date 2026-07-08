@@ -3,97 +3,86 @@
     "step": {
       "user": {
         "title": "Sigenergy Account",
-        "description": "Configure your Sigenergy account. For API documentation, visit: https://developer.sigencloud.com/user/api/document/17",
+        "description": "Configure your Sigenergy account",
         "data": {
           "username": "Username",
           "password": "Password",
-          "account_id": "Account ID (optional)",
-          "api_key": "API Key (optional)"
+          "account_id": "Account ID",
+          "api_key": "API key",
+          "client_id": "OAuth2 client ID",
+          "client_secret": "OAuth2 client secret",
+          "energy_flow_interval": "Energy flow polling interval (seconds)",
+          "summary_interval": "Summary polling interval (seconds)"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid username or password",
-      "cannot_connect": "Failed to connect to Sigenergy API",
-      "unknown": "Unknown error occurred"
+      "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Cannot connect",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "This account is already configured"
+      "already_configured": "Account is already configured"
     }
   },
   "entity": {
     "sensor": {
       "system_power": {
-        "name": "System Power"
+        "name": "System power"
       },
       "system_soc": {
-        "name": "System State of Charge"
-      },
-      "battery_power": {
-        "name": "Battery Power"
-      },
-      "grid_power": {
-        "name": "Grid Power"
+        "name": "Battery state of charge"
       },
       "pv_power": {
-        "name": "PV Power"
+        "name": "PV power"
+      },
+      "grid_power": {
+        "name": "Grid power"
+      },
+      "ev_power": {
+        "name": "EV power"
       },
       "load_power": {
-        "name": "Load Power"
+        "name": "Load power"
+      },
+      "battery_power": {
+        "name": "Battery power"
+      },
+      "daily_power_generation": {
+        "name": "Daily generation"
+      },
+      "monthly_power_generation": {
+        "name": "Monthly generation"
+      },
+      "annual_power_generation": {
+        "name": "Annual generation"
+      },
+      "lifetime_power_generation": {
+        "name": "Lifetime generation"
+      },
+      "lifetime_co2_reduction": {
+        "name": "Lifetime CO2 reduction"
+      },
+      "lifetime_coal_saved": {
+        "name": "Lifetime coal saved"
+      },
+      "lifetime_trees_planted": {
+        "name": "Lifetime trees equivalent"
       }
     },
     "switch": {
       "charger_status": {
-        "name": "Charger Status"
+        "name": "Charger"
       }
     },
     "binary_sensor": {
       "system_online": {
-        "name": "System Online"
-      }
-    }
-  },
-  "services": {
-    "set_charging_profile": {
-      "name": "Set Charging Profile",
-      "description": "Set the charging profile for a charger",
-      "fields": {
-        "system_id": {
-          "name": "System ID",
-          "description": "The system ID"
-        },
-        "device_id": {
-          "name": "Device ID",
-          "description": "The device ID"
-        },
-        "max_power": {
-          "name": "Max Power",
-          "description": "Maximum charging power in watts"
-        }
+        "name": "System online"
       }
     },
-    "start_charging": {
-      "name": "Start Charging",
-      "description": "Start charging a device",
-      "fields": {
-        "system_id": {
-          "name": "System ID"
-        },
-        "device_id": {
-          "name": "Device ID"
-        }
-      }
-    },
-    "stop_charging": {
-      "name": "Stop Charging",
-      "description": "Stop charging a device",
-      "fields": {
-        "system_id": {
-          "name": "System ID"
-        },
-        "device_id": {
-          "name": "Device ID"
-        }
+    "number": {
+      "charger_max_power": {
+        "name": "Charger max power"
       }
     }
   }

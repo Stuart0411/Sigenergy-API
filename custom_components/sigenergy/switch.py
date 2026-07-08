@@ -1,15 +1,17 @@
-"""Switch entities for Sigenergy integration."""
+"""Switch platform for Sigenergy integration."""
 
-from typing import Any, Optional
+from __future__ import annotations
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import SigenergyApiError, SigenergyClient
 from .const import DOMAIN
-from .coordinator import SigenergySomeDataUpdateCoordinator
-from .entity import SigenergySomeCoordinatorEntity
-from .api import SigenergySomeAPIError
+from .coordinator import SigenergyDataUpdateCoordinator
+from .entity import SigenergyEntity
 
 
 async def async_setup_entry(
@@ -17,84 +19,56 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Sigenergy switches."""
-    coordinator: SigenergySomeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
-    api_client = hass.data[DOMAIN][entry.entry_id]["api_client"]
+    """Set up Sigenergy switch entities."""
+    coordinator: SigenergyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    client: SigenergyClient = hass.data[DOMAIN][entry.entry_id]["client"]
 
-    entities = []
-
-    # Create switch entities for controllable devices
+    entities: list[SwitchEntity] = []
     for system in coordinator.data.get("systems", []):
-        system_id = system.get("id")
-
+        system_id = str(system.get("id"))
         for device in coordinator.data.get("devices", {}).get(system_id, []):
-            device_id = device.get("id")
-            device_name = device.get("name", f"Device {device_id}")
-            device_type = device.get("type")
+            if str(device.get("type", "")).lower() != "charger":
+                continue
 
-            if device_type == "charger":
-                entities.append(
-                    SigenergySomeChargerSwitch(
-                        coordinator=coordinator,
-                        api_client=api_client,
-                        system_id=system_id,
-                        device_id=device_id,
-                        device_name=device_name,
-                    )
-                )
+            device_id = str(device.get("id"))
+            device_name = device.get("name") or f"Charger {device_id}"
+            entities.append(SigenergyChargerSwitch(coordinator, client, system_id, device_id, device_name))
 
     async_add_entities(entities)
 
 
-class SigenergySomeChargerSwitch(SwitchEntity, SigenergySomeCoordinatorEntity):
-    """Charger control switch."""
+class SigenergyChargerSwitch(SigenergyEntity, SwitchEntity):
+    """Switch controlling charger start/stop."""
 
     _attr_translation_key = "charger_status"
 
-    def __init__(self, api_client, **kwargs):
-        """Initialize the switch."""
-        super().__init__(**kwargs)
-        self.api_client = api_client
+    def __init__(
+        self,
+        coordinator: SigenergyDataUpdateCoordinator,
+        client: SigenergyClient,
+        system_id: str,
+        device_id: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator, system_id, device_id, name)
+        self._client = client
 
     @property
     def is_on(self) -> bool:
-        """Return true if the switch is on."""
-        device_data = (
-            self.coordinator.data.get("device_data", {})
-            .get(self.system_id, {})
-            .get(self.device_id, {})
-        )
-        status = device_data.get("status", "").lower()
-        return status == "charging" or status == "active"
+        payload = self.coordinator.data.get("device_data", {}).get(self.system_id, {}).get(self.device_id, {})
+        status = str(payload.get("status", "")).lower()
+        return status in {"charging", "active", "on"}
 
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the charger."""
+    async def async_turn_on(self, **kwargs) -> None:
         try:
-            await self.api_client.set_device_command(
-                self.system_id,
-                self.device_id,
-                "start_charging",
-                {},
-            )
-            await self.coordinator.async_request_refresh()
-        except SigenergySomeAPIError as err:
-            raise HomeAssistantError(f"Failed to turn on charger: {err}") from err
+            await self._client.set_device_command(self.system_id, self.device_id, "start_charging", {})
+        except SigenergyApiError as err:
+            raise HomeAssistantError(f"Failed to start charging: {err}") from err
+        await self.coordinator.async_request_refresh()
 
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the charger."""
+    async def async_turn_off(self, **kwargs) -> None:
         try:
-            await self.api_client.set_device_command(
-                self.system_id,
-                self.device_id,
-                "stop_charging",
-                {},
-            )
-            await self.coordinator.async_request_refresh()
-        except SigenergySomeAPIError as err:
-            raise HomeAssistantError(f"Failed to turn off charger: {err}") from err
-
-
-class HomeAssistantError(Exception):
-    """Base Home Assistant error."""
+            await self._client.set_device_command(self.system_id, self.device_id, "stop_charging", {})
+        except SigenergyApiError as err:
+            raise HomeAssistantError(f"Failed to stop charging: {err}") from err
+        await self.coordinator.async_request_refresh()

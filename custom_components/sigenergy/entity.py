@@ -1,69 +1,41 @@
-"""Base entity classes for Sigenergy integration."""
+"""Entity helpers for Sigenergy integration."""
 
-from typing import Any, Dict, Optional
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.entity_component import EntityComponent
-from homeassistant.const import ATTR_ATTRIBUTION
+from __future__ import annotations
+
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import SigenergySomeDataUpdateCoordinator
+from .coordinator import SigenergyDataUpdateCoordinator
 
 
-class SigenergySomeEntity(Entity):
-    """Base class for Sigenergy entities."""
+class SigenergyEntity(CoordinatorEntity[SigenergyDataUpdateCoordinator]):
+    """Base class for all Sigenergy entities."""
 
-    _attr_attribution = "Data provided by Sigenergy"
     _attr_has_entity_name = True
+    _attr_attribution = "Data provided by Sigenergy"
 
     def __init__(
         self,
-        coordinator: SigenergySomeDataUpdateCoordinator,
+        coordinator: SigenergyDataUpdateCoordinator,
         system_id: str,
         device_id: str,
-        device_name: str,
-    ):
-        """Initialize the entity."""
-        self.coordinator = coordinator
+        name: str,
+    ) -> None:
+        super().__init__(coordinator)
         self.system_id = system_id
         self.device_id = device_id
-        self.device_name = device_name
-
-    @property
-    def device_info(self) -> Dict[str, Any]:
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, f"{self.system_id}_{self.device_id}")},
-            "name": self.device_name,
-            "manufacturer": "Sigenergy",
-            "model": "Unknown",
-        }
+        self._attr_name = name
 
     @property
     def unique_id(self) -> str:
-        """Return a unique ID."""
-        return f"{DOMAIN}_{self.system_id}_{self.device_id}"
+        """Return unique id for this entity."""
+        return f"{DOMAIN}_{self.system_id}_{self.device_id}_{self.__class__.__name__.lower()}"
 
     @property
-    def should_poll(self) -> bool:
-        """No polling needed."""
-        return False
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        return self.coordinator.last_update_success
-
-
-class SigenergySomeCoordinatorEntity(SigenergySomeEntity):
-    """Sigenergy entity with coordinator."""
-
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to hass."""
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self._handle_coordinator_update)
-        )
-
-    def _handle_coordinator_update(self) -> None:
-        """Handle coordinator update."""
-        self.async_write_ha_state()
+    def device_info(self) -> dict:
+        """Return device metadata."""
+        return {
+            "identifiers": {(DOMAIN, f"{self.system_id}_{self.device_id}")},
+            "name": self._attr_name,
+            "manufacturer": "Sigenergy",
+        }

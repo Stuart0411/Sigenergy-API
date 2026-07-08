@@ -1,17 +1,15 @@
-"""Binary sensor entities for Sigenergy integration."""
+"""Binary sensor platform for Sigenergy integration."""
 
-from typing import Any, Optional
-from homeassistant.components.binary_sensor import (
-    BinarySensorEntity,
-    BinarySensorDeviceClass,
-)
+from __future__ import annotations
+
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import SigenergySomeDataUpdateCoordinator
-from .entity import SigenergySomeCoordinatorEntity
+from .coordinator import SigenergyDataUpdateCoordinator
+from .entity import SigenergyEntity
 
 
 async def async_setup_entry(
@@ -20,43 +18,39 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Sigenergy binary sensors."""
-    coordinator: SigenergySomeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
+    coordinator: SigenergyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
 
-    entities = []
-
-    # Create binary sensor entities for system status
+    entities: list[BinarySensorEntity] = []
     for system in coordinator.data.get("systems", []):
-        system_id = system.get("id")
-        system_name = system.get("name", f"System {system_id}")
-
-        entities.append(
-            SigenergySomeSystemOnlineBinarySensor(
-                coordinator=coordinator,
-                system_id=system_id,
-                device_id=system_id,
-                device_name=system_name,
-            )
-        )
+        system_id = str(system.get("id"))
+        if not system_id:
+            continue
+        system_name = system.get("name") or f"System {system_id}"
+        entities.append(SigenergySystemOnlineBinarySensor(coordinator, system_id, system_name))
 
     async_add_entities(entities)
 
 
-class SigenergySomeSystemOnlineBinarySensor(BinarySensorEntity, SigenergySomeCoordinatorEntity):
-    """System online binary sensor."""
+class SigenergySystemOnlineBinarySensor(SigenergyEntity, BinarySensorEntity):
+    """System connectivity status."""
 
     _attr_translation_key = "system_online"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
+    def __init__(self, coordinator: SigenergyDataUpdateCoordinator, system_id: str, name: str) -> None:
+        super().__init__(coordinator, system_id, system_id, name)
+
     @property
     def is_on(self) -> bool:
-        """Return true if system is online."""
         system = next(
-            (s for s in self.coordinator.data.get("systems", []) if s.get("id") == self.system_id),
+            (
+                candidate
+                for candidate in self.coordinator.data.get("systems", [])
+                if str(candidate.get("id")) == self.system_id
+            ),
             None,
         )
         if not system:
             return False
-        status = system.get("status", "").lower()
-        return status == "online" or status == "active"
+        status = str(system.get("status", "")).lower()
+        return status in {"online", "active", "normal"}

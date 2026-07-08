@@ -1,16 +1,18 @@
-"""Number entities for Sigenergy integration."""
+"""Number platform for Sigenergy integration."""
 
-from typing import Any, Optional
+from __future__ import annotations
+
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import POWER_WATT
+from homeassistant.const import UnitOfPower
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import SigenergyApiError, SigenergyClient
 from .const import DOMAIN
-from .coordinator import SigenergySomeDataUpdateCoordinator
-from .entity import SigenergySomeCoordinatorEntity
-from .api import SigenergySomeAPIError
+from .coordinator import SigenergyDataUpdateCoordinator
+from .entity import SigenergyEntity
 
 
 async def async_setup_entry(
@@ -19,74 +21,59 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Sigenergy number entities."""
-    coordinator: SigenergySomeDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
-    api_client = hass.data[DOMAIN][entry.entry_id]["api_client"]
+    coordinator: SigenergyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    client: SigenergyClient = hass.data[DOMAIN][entry.entry_id]["client"]
 
-    entities = []
-
-    # Create number entities for charging power control
+    entities: list[NumberEntity] = []
     for system in coordinator.data.get("systems", []):
-        system_id = system.get("id")
-
+        system_id = str(system.get("id"))
         for device in coordinator.data.get("devices", {}).get(system_id, []):
-            device_id = device.get("id")
-            device_name = device.get("name", f"Device {device_id}")
-            device_type = device.get("type")
+            if str(device.get("type", "")).lower() != "charger":
+                continue
 
-            if device_type == "charger":
-                entities.append(
-                    SigenergySomeChargerMaxPowerNumber(
-                        coordinator=coordinator,
-                        api_client=api_client,
-                        system_id=system_id,
-                        device_id=device_id,
-                        device_name=device_name,
-                    )
-                )
+            device_id = str(device.get("id"))
+            device_name = device.get("name") or f"Charger {device_id}"
+            entities.append(
+                SigenergyChargerMaxPowerNumber(coordinator, client, system_id, device_id, device_name)
+            )
 
     async_add_entities(entities)
 
 
-class SigenergySomeChargerMaxPowerNumber(NumberEntity, SigenergySomeCoordinatorEntity):
-    """Charger max power number."""
+class SigenergyChargerMaxPowerNumber(SigenergyEntity, NumberEntity):
+    """Max charger power control."""
 
     _attr_translation_key = "charger_max_power"
-    _attr_native_unit_of_measurement = POWER_WATT
     _attr_mode = NumberMode.BOX
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_native_min_value = 0
     _attr_native_max_value = 50000
     _attr_native_step = 100
 
-    def __init__(self, api_client, **kwargs):
-        """Initialize the number entity."""
-        super().__init__(**kwargs)
-        self.api_client = api_client
+    def __init__(
+        self,
+        coordinator: SigenergyDataUpdateCoordinator,
+        client: SigenergyClient,
+        system_id: str,
+        device_id: str,
+        name: str,
+    ) -> None:
+        super().__init__(coordinator, system_id, device_id, name)
+        self._client = client
 
     @property
-    def native_value(self) -> Optional[float]:
-        """Return the entity value."""
-        device_data = (
-            self.coordinator.data.get("device_data", {})
-            .get(self.system_id, {})
-            .get(self.device_id, {})
-        )
-        return device_data.get("max_charging_power")
+    def native_value(self):
+        payload = self.coordinator.data.get("device_data", {}).get(self.system_id, {}).get(self.device_id, {})
+        return payload.get("max_charging_power")
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set new value."""
         try:
-            await self.api_client.set_device_command(
+            await self._client.set_device_command(
                 self.system_id,
                 self.device_id,
                 "set_max_power",
                 {"max_power": int(value)},
             )
-            await self.coordinator.async_request_refresh()
-        except SigenergySomeAPIError as err:
-            raise HomeAssistantError(f"Failed to set charging power: {err}") from err
-
-
-class HomeAssistantError(Exception):
-    """Base Home Assistant error."""
+        except SigenergyApiError as err:
+            raise HomeAssistantError(f"Failed to set max charging power: {err}") from err
+        await self.coordinator.async_request_refresh()

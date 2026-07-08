@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timedelta
+import json
+import time
 from typing import Any
 
 import aiohttp
@@ -14,17 +15,21 @@ from .const import SIGENERGY_API_BASE, SIGENERGY_API_TIMEOUT, SIGENERGY_TOKEN_EX
 class SigenergyApiError(Exception):
     """Base exception for Sigenergy API errors."""
 
+    def __init__(self, message: str, code: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 class SigenergyInvalidAuth(SigenergyApiError):
-    """Exception raised on auth failures."""
+    """Authentication error."""
 
 
 class SigenergyConnectionError(SigenergyApiError):
-    """Exception raised on connectivity failures."""
+    """Connection error."""
 
 
 class SigenergyClient:
-    """Sigenergy API client with OAuth2 token management."""
+    """Client for the Sigenergy Cloud OpenAPI."""
 
     def __init__(
         self,
@@ -35,6 +40,7 @@ class SigenergyClient:
         api_key: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
+        base_url: str = SIGENERGY_API_BASE,
     ) -> None:
         self._session = session
         self._username = username
@@ -43,193 +49,270 @@ class SigenergyClient:
         self._api_key = api_key
         self._client_id = client_id
         self._client_secret = client_secret
-        self._base_url = SIGENERGY_API_BASE.rstrip("/")
+        self._base_url = base_url.rstrip("/")
         self._access_token: str | None = None
-        self._token_expires_at: datetime | None = None
+        self._token_expiry: float = 0
+
+    @property
+    def is_token_valid(self) -> bool:
+        """Check if current token is still valid."""
+        return self._access_token is not None and time.time() < (self._token_expiry - 600)
 
     async def authenticate(self) -> None:
-        """Authenticate and cache access token."""
-        timeout = aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT)
-        token_paths = [
-            "oauth/token",
-            "openapi/oauth/token",
-            "openapi/token",
-        ]
-
-        attempts: list[tuple[str, dict[str, Any], dict[str, str]]] = []
+        """Authenticate and obtain an access token."""
         if self._client_id and self._client_secret:
-            attempts.append(
-                (
-                    "client_credentials_body",
-                    {
-                        "grant_type": "client_credentials",
-                        "client_id": self._client_id,
-                        "client_secret": self._client_secret,
-                    },
-                    {"Content-Type": "application/x-www-form-urlencoded"},
-                )
-            )
-            basic = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
-            attempts.append(
-                (
-                    "client_credentials_basic",
-                    {"grant_type": "client_credentials"},
-                    {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Authorization": f"Basic {basic}",
-                    },
-                )
-            )
+            await self._auth_key()
+        else:
+            await self._auth_password()
 
-        attempts.append(
-            (
-                "password",
-                {
-                    "grant_type": "password",
-                    "username": self._username,
-                    "password": self._password,
-                    "client_id": self._client_id or "home-assistant",
-                    "client_secret": self._client_secret or "",
-                },
-                {"Content-Type": "application/x-www-form-urlencoded"},
-            )
+    async def _auth_password(self) -> None:
+        """Authenticate using username/password flow."""
+        data = await self._raw_post(
+            f"{self._base_url}/openapi/auth/login/password",
+            {"username": self._username, "password": self._password},
+            authenticated=False,
         )
+        self._parse_token_response(data)
 
-        last_status: int | None = None
-        last_body: str = ""
-        data: dict[str, Any] | None = None
+    async def _auth_key(self) -> None:
+        """Authenticate using key/secret flow."""
+        key_string = f"{self._client_id}:{self._client_secret}"
+        encoded_key = base64.b64encode(key_string.encode()).decode()
+        data = await self._raw_post(
+            f"{self._base_url}/openapi/auth/login/key",
+            {"key": encoded_key},
+            authenticated=False,
+        )
+        self._parse_token_response(data)
 
-        try:
-            for path in token_paths:
-                url = f"{self._base_url}/{path}"
-                for _name, payload, headers in attempts:
-                    async with self._session.post(
-                        url,
-                        data=payload,
-                        headers=headers,
-                        timeout=timeout,
-                    ) as resp:
-                        if resp.status != 200:
-                            last_status = resp.status
-                            last_body = (await resp.text())[:500]
-                            continue
+    def _parse_token_response(self, data: dict[str, Any]) -> None:
+        """Parse token from auth response."""
+        code = int(data.get("code", -1))
+        if code != 0:
+            msg = data.get("msg", "Authentication failed")
+            if code in (11002, 11003):
+                raise SigenergyInvalidAuth(msg, code=code)
+            raise SigenergyApiError(f"{msg} (code {code})", code=code)
 
-                        candidate = await resp.json()
-                        if candidate.get("access_token"):
-                            data = candidate
-                            break
-                if data:
-                    break
-        except aiohttp.ClientError as err:
-            raise SigenergyConnectionError(str(err)) from err
+        token_data = data.get("data")
+        if isinstance(token_data, str):
+            token_data = json.loads(token_data)
+        if not isinstance(token_data, dict):
+            raise SigenergyInvalidAuth("Authentication response missing token data")
 
-        if data is None:
-            if last_status in (400, 401, 403):
-                raise SigenergyInvalidAuth(
-                    f"Authentication rejected ({last_status}). Response: {last_body}"
-                )
-            raise SigenergyApiError(
-                f"Authentication failed{f' ({last_status})' if last_status else ''}."
-            )
-
-        token = data.get("access_token")
+        token = token_data.get("accessToken") or token_data.get("access_token")
         if not token:
-            raise SigenergyInvalidAuth("Authentication response missing access_token")
+            raise SigenergyInvalidAuth("Authentication response missing access token")
 
-        expires_in = int(data.get("expires_in", SIGENERGY_TOKEN_EXPIRY))
+        expires_in = int(token_data.get("expiresIn", SIGENERGY_TOKEN_EXPIRY))
         self._access_token = token
-        self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        self._token_expiry = time.time() + expires_in
 
     async def _ensure_token(self) -> None:
-        if not self._access_token or not self._token_expires_at:
-            await self.authenticate()
-            return
-
-        if datetime.utcnow() >= self._token_expires_at:
+        if not self.is_token_valid:
             await self.authenticate()
 
-    async def _headers(self) -> dict[str, str]:
-        if self._api_key:
-            return {"Content-Type": "application/json", "X-API-Key": self._api_key}
+    def _check_response(self, data: dict[str, Any], path: str) -> dict[str, Any]:
+        """Check API response body for Sigenergy error codes."""
+        code = data.get("code")
+        if code is None:
+            return data
 
-        await self._ensure_token()
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._access_token}",
-        }
+        code = int(code)
+        if code == 0:
+            return data
+        if code in (11002, 11003):
+            raise SigenergyInvalidAuth(data.get("msg", "Auth error"), code=code)
+        if code in (1110, 1201):
+            raise SigenergyApiError(data.get("msg", "Rate limit / access restriction"), code=code)
 
-    async def _request_json(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        url = f"{self._base_url}/{path.lstrip('/')}"
-        headers = await self._headers()
-        kwargs.setdefault("timeout", aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT))
-        kwargs["headers"] = {**headers, **kwargs.get("headers", {})}
+        raise SigenergyApiError(f"{data.get('msg', 'API error')} (code {code}) for {path}", code=code)
+
+    async def _raw_post(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        authenticated: bool = True,
+    ) -> dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if authenticated:
+            await self._ensure_token()
+            headers["Authorization"] = f"Bearer {self._access_token}"
 
         try:
-            async with self._session.request(method, url, **kwargs) as resp:
-                if resp.status == 401 and not self._api_key:
-                    await self.authenticate()
-                    headers = await self._headers()
-                    kwargs["headers"] = {**headers, **kwargs.get("headers", {})}
-                    async with self._session.request(method, url, **kwargs) as retry_resp:
-                        if retry_resp.status != 200:
-                            raise SigenergyApiError(
-                                f"Request failed {method} {path}: {retry_resp.status}"
-                            )
-                        return await retry_resp.json()
-
-                if resp.status != 200:
-                    raise SigenergyApiError(f"Request failed {method} {path}: {resp.status}")
+            async with self._session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT),
+            ) as resp:
+                resp.raise_for_status()
                 return await resp.json()
+        except aiohttp.ClientResponseError as err:
+            if err.status in (401, 403):
+                raise SigenergyInvalidAuth(f"Authentication rejected: {err.status}") from err
+            raise SigenergyApiError(f"API request failed: {err}") from err
         except aiohttp.ClientError as err:
-            raise SigenergyConnectionError(str(err)) from err
+            raise SigenergyConnectionError(f"Connection error: {err}") from err
+
+    async def _raw_get(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        await self._ensure_token()
+        headers = {"Authorization": f"Bearer {self._access_token}"}
+
+        try:
+            async with self._session.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT),
+            ) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+        except aiohttp.ClientResponseError as err:
+            if err.status in (401, 403):
+                raise SigenergyInvalidAuth(f"Authentication rejected: {err.status}") from err
+            raise SigenergyApiError(f"API request failed: {err}") from err
+        except aiohttp.ClientError as err:
+            raise SigenergyConnectionError(f"Connection error: {err}") from err
+
+    async def _api_get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = await self._raw_get(f"{self._base_url}/{path.lstrip('/')}", params=params)
+        return self._check_response(data, path)
+
+    async def _api_post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if payload is None:
+            payload = {}
+        data = await self._raw_post(f"{self._base_url}/{path.lstrip('/')}", payload)
+        return self._check_response(data, path)
+
+    @staticmethod
+    def _parse_data(value: Any) -> Any:
+        """Parse JSON-encoded string values if necessary."""
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
 
     async def get_systems(self) -> list[dict[str, Any]]:
-        """Return all systems accessible by this account."""
-        data = await self._request_json("GET", "systems")
-        return data.get("systems", data.get("data", []))
+        """Get list of all authorized systems."""
+        data = await self._api_get("openapi/system")
+        raw = self._parse_data(data.get("data", []))
+        systems = raw if isinstance(raw, list) else []
+
+        normalized: list[dict[str, Any]] = []
+        for system in systems:
+            if not isinstance(system, dict):
+                continue
+            normalized.append(
+                {
+                    **system,
+                    "id": str(system.get("systemId") or system.get("id") or ""),
+                    "name": system.get("systemName") or system.get("name") or "Sigenergy System",
+                }
+            )
+        return normalized
 
     async def get_system_details(self, system_id: str) -> dict[str, Any]:
-        """Return details for one system."""
-        return await self._request_json("GET", f"systems/{system_id}")
+        """Get details for a specific system."""
+        systems = await self.get_systems()
+        for system in systems:
+            if str(system.get("id")) == str(system_id):
+                return system
+        return {}
 
     async def get_system_devices(self, system_id: str) -> list[dict[str, Any]]:
-        """Return devices within one system."""
-        data = await self._request_json("GET", f"systems/{system_id}/devices")
-        return data.get("devices", data.get("data", []))
+        """Get all devices for a system."""
+        data = await self._api_get(
+            f"openapi/system/{system_id}/devices",
+            {"systemId": system_id},
+        )
+        raw = self._parse_data(data.get("data", []))
+        devices = raw if isinstance(raw, list) else []
+
+        normalized: list[dict[str, Any]] = []
+        for device in devices:
+            if not isinstance(device, dict):
+                continue
+            normalized.append(
+                {
+                    **device,
+                    "id": str(device.get("serialNumber") or device.get("id") or ""),
+                    "name": (
+                        device.get("deviceName")
+                        or device.get("deviceAlias")
+                        or device.get("name")
+                        or f"Device {device.get('serialNumber', '')}"
+                    ),
+                    "type": str(device.get("deviceType") or device.get("type") or "").lower(),
+                }
+            )
+        return normalized
 
     async def get_device_data(self, system_id: str, device_id: str) -> dict[str, Any]:
-        """Return realtime data for one device."""
-        return await self._request_json("GET", f"systems/{system_id}/devices/{device_id}/data")
+        """Get real-time data for a specific device."""
+        data = await self._api_get(
+            f"openapi/systems/{system_id}/devices/{device_id}/realtimeInfo",
+            {"systemId": system_id, "serialNumber": device_id},
+        )
+        parsed = self._parse_data(data.get("data", {}))
+        return parsed if isinstance(parsed, dict) else {}
 
     async def set_device_command(
-        self, system_id: str, device_id: str, command: str, parameters: dict[str, Any]
+        self,
+        system_id: str,
+        device_id: str,
+        command: str,
+        parameters: dict[str, Any],
     ) -> dict[str, Any]:
-        """Send a command to one device."""
-        payload = {"command": command, "parameters": parameters}
-        return await self._request_json(
-            "POST", f"systems/{system_id}/devices/{device_id}/command", json=payload
-        )
+        """Send command to device."""
+        payload = {
+            "systemId": system_id,
+            "serialNumber": device_id,
+            "command": command,
+            "parameters": parameters,
+        }
+        data = await self._api_post(f"openapi/instruction/{system_id}/settings", payload)
+        parsed = self._parse_data(data.get("data", {}))
+        return parsed if isinstance(parsed, dict) else {}
 
     async def subscribe_to_telemetry(self, system_ids: list[str]) -> bool:
-        """Subscribe to MQTT telemetry topic (openapi/subscription/period)."""
+        """Subscribe to periodic telemetry push topic."""
         await self._ensure_token()
-        payload = {"accessToken": self._access_token, "systemIdList": system_ids}
-        await self._request_json("POST", "openapi/subscription/period", json=payload)
+        await self._api_post(
+            "openapi/subscription/period",
+            {"accessToken": self._access_token, "systemIdList": system_ids},
+        )
         return True
 
     async def subscribe_to_system_data(self, system_ids: list[str]) -> bool:
-        """Subscribe to MQTT change topic (openapi/subscription/change)."""
+        """Subscribe to change-data push topic."""
         await self._ensure_token()
-        payload = {"accessToken": self._access_token, "systemIdList": system_ids}
-        await self._request_json("POST", "openapi/subscription/change", json=payload)
+        await self._api_post(
+            "openapi/subscription/change",
+            {"accessToken": self._access_token, "systemIdList": system_ids},
+        )
         return True
 
     async def get_system_energy_flow(self, system_id: str) -> dict[str, Any]:
-        """Doc 36: GET openapi/systems/{systemId}/energyFlow."""
-        data = await self._request_json("GET", f"openapi/systems/{system_id}/energyFlow")
-        return data.get("data", data)
+        """Doc 36: Get realtime energy flow for a system."""
+        data = await self._api_get(
+            f"openapi/systems/{system_id}/energyFlow",
+            {"systemId": system_id},
+        )
+        parsed = self._parse_data(data.get("data", {}))
+        return parsed if isinstance(parsed, dict) else {}
 
     async def get_system_summary(self, system_id: str) -> dict[str, Any]:
-        """Doc 35: GET openapi/systems/{systemId}/summary."""
-        data = await self._request_json("GET", f"openapi/systems/{system_id}/summary")
-        return data.get("data", data)
+        """Doc 35: Get realtime summary for a system."""
+        data = await self._api_get(
+            f"openapi/systems/{system_id}/summary",
+            {"systemId": system_id},
+        )
+        parsed = self._parse_data(data.get("data", {}))
+        return parsed if isinstance(parsed, dict) else {}

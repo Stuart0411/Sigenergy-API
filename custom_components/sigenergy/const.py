@@ -3,11 +3,32 @@
 DOMAIN = "sigenergy"
 
 # API Configuration
-SIGENERGY_API_BASE = "https://api.sigencloud.com"
+SIGENERGY_API_BASE = "https://openapi-eu.sigencloud.com"
 SIGENERGY_MQTT_BROKER = "mqtt.sigencloud.com"
 SIGENERGY_MQTT_PORT = 1883
 SIGENERGY_API_TIMEOUT = 30
 SIGENERGY_TOKEN_EXPIRY = 43200  # 12 hours in seconds
+
+# Regions
+REGION_EU = "eu"
+REGION_AP = "ap"
+REGION_MEA = "mea"
+REGION_CN = "cn"
+REGION_ANZ = "anz"
+REGION_LA = "la"
+REGION_NA = "na"
+REGION_JP = "jp"
+
+REGION_URLS = {
+	REGION_EU: "https://openapi-eu.sigencloud.com",
+	REGION_AP: "https://openapi-apac.sigencloud.com",
+	REGION_MEA: "https://openapi-eu.sigencloud.com",
+	REGION_CN: "https://openapi-cn.sigencloud.com",
+	REGION_ANZ: "https://openapi-aus.sigencloud.com",
+	REGION_LA: "https://openapi-us.sigencloud.com",
+	REGION_NA: "https://openapi-us.sigencloud.com",
+	REGION_JP: "https://openapi-jp.sigencloud.com",
+}
 
 # Configuration keys
 CONF_USERNAME = "username"
@@ -16,6 +37,7 @@ CONF_ACCOUNT_ID = "account_id"
 CONF_API_KEY = "api_key"
 CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
+CONF_REGION = "region"
 CONF_USE_MQTT = "use_mqtt_realtime"
 CONF_ENERGY_FLOW_INTERVAL = "energy_flow_interval"
 CONF_SUMMARY_INTERVAL = "summary_interval"

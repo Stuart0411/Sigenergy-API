@@ -25,10 +25,20 @@ from .const import (
     CONF_CLIENT_SECRET,
     CONF_ENERGY_FLOW_INTERVAL,
     CONF_PASSWORD,
+    CONF_REGION,
     CONF_SUMMARY_INTERVAL,
     CONF_USERNAME,
     DOMAIN,
     ENERGY_FLOW_INTERVAL,
+    REGION_ANZ,
+    REGION_AP,
+    REGION_CN,
+    REGION_EU,
+    REGION_JP,
+    REGION_LA,
+    REGION_MEA,
+    REGION_NA,
+    REGION_URLS,
     SUMMARY_INTERVAL,
 )
 
@@ -45,6 +55,7 @@ async def validate_input(hass: HomeAssistant, user_input: dict[str, Any]) -> Non
         api_key=user_input.get(CONF_API_KEY),
         client_id=user_input.get(CONF_CLIENT_ID),
         client_secret=user_input.get(CONF_CLIENT_SECRET),
+        base_url=REGION_URLS[user_input[CONF_REGION]],
     )
 
     try:
@@ -52,11 +63,11 @@ async def validate_input(hass: HomeAssistant, user_input: dict[str, Any]) -> Non
         await client.get_systems()
     except SigenergyInvalidAuth as err:
         raise InvalidAuth from err
-    except SigenergyApiError as err:
-        # Sigenergy frequently returns auth-style API errors as 403.
-        raise InvalidAuth from err
     except SigenergyConnectionError as err:
         raise CannotConnect from err
+    except SigenergyApiError as err:
+        # Most API errors during validation are auth/provisioning related.
+        raise InvalidAuth from err
 
 
 class SigenergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -93,6 +104,18 @@ class SigenergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_REGION, default=REGION_EU): vol.In(
+                        {
+                            REGION_EU: "Europe",
+                            REGION_AP: "Asia Pacific & Middle Asia",
+                            REGION_MEA: "Middle East & Africa",
+                            REGION_CN: "Chinese Mainland",
+                            REGION_ANZ: "Australia & New Zealand",
+                            REGION_LA: "Latin America",
+                            REGION_NA: "North America",
+                            REGION_JP: "Japan",
+                        }
+                    ),
                     vol.Required(CONF_USERNAME): str,
                     vol.Required(CONF_PASSWORD): str,
                     vol.Optional(CONF_ACCOUNT_ID): str,

@@ -17,10 +17,13 @@ from .const import (
     CONF_CLIENT_SECRET,
     CONF_ENERGY_FLOW_INTERVAL,
     CONF_PASSWORD,
+    CONF_REGION,
     CONF_SUMMARY_INTERVAL,
     CONF_USERNAME,
     DOMAIN,
     ENERGY_FLOW_INTERVAL,
+    REGION_EU,
+    REGION_URLS,
     SUMMARY_INTERVAL,
 )
 from .coordinator import SigenergyDataUpdateCoordinator
@@ -45,6 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api_key=entry.data.get(CONF_API_KEY),
         client_id=entry.data.get(CONF_CLIENT_ID),
         client_secret=entry.data.get(CONF_CLIENT_SECRET),
+        base_url=REGION_URLS.get(entry.data.get(CONF_REGION, REGION_EU), REGION_URLS[REGION_EU]),
     )
 
     coordinator = SigenergyDataUpdateCoordinator(

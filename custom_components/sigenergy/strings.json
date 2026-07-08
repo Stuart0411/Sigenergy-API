@@ -5,12 +5,13 @@
         "title": "Sigenergy Account",
         "description": "Configure your Sigenergy account",
         "data": {
+          "region": "Region",
           "username": "Username",
           "password": "Password",
           "account_id": "Account ID",
           "api_key": "API key",
-          "client_id": "OAuth2 client ID",
-          "client_secret": "OAuth2 client secret",
+          "client_id": "App key / Client ID",
+          "client_secret": "App secret / Client secret",
           "energy_flow_interval": "Energy flow polling interval (seconds)",
           "summary_interval": "Summary polling interval (seconds)"
         }

@@ -1,9 +1,7 @@
 {
   "name": "Sigenergy API",
-  "country": ["*"],
-  "homeassistant": ">=2024.1.0",
+  "homeassistant": "2024.1.0",
   "render_readme": true,
   "content_in_root": false,
-  "domains": ["sigenergy"],
-  "iot_class": "cloud_polling"
+  "domains": ["sigenergy"]
 }

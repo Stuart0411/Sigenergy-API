@@ -8,7 +8,6 @@
   "requirements": [],
   "version": "0.2.0",
   "issue_tracker": "https://github.com/Stuart0411/Sigenergy-API/issues",
-  "is_class_codeowner": false,
   "iot_class": "cloud_polling",
   "integration_type": "hub",
   "homeassistant": "2024.1.0"

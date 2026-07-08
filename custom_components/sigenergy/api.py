@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -48,37 +49,88 @@ class SigenergyClient:
 
     async def authenticate(self) -> None:
         """Authenticate and cache access token."""
-        url = f"{self._base_url}/oauth/token"
+        timeout = aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT)
+        token_paths = [
+            "oauth/token",
+            "openapi/oauth/token",
+            "openapi/token",
+        ]
 
+        attempts: list[tuple[str, dict[str, Any], dict[str, str]]] = []
         if self._client_id and self._client_secret:
-            payload = {
-                "grant_type": "client_credentials",
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-            }
-        else:
-            payload = {
-                "grant_type": "password",
-                "username": self._username,
-                "password": self._password,
-                "client_id": self._client_id or "home-assistant",
-            }
+            attempts.append(
+                (
+                    "client_credentials_body",
+                    {
+                        "grant_type": "client_credentials",
+                        "client_id": self._client_id,
+                        "client_secret": self._client_secret,
+                    },
+                    {"Content-Type": "application/x-www-form-urlencoded"},
+                )
+            )
+            basic = base64.b64encode(f"{self._client_id}:{self._client_secret}".encode()).decode()
+            attempts.append(
+                (
+                    "client_credentials_basic",
+                    {"grant_type": "client_credentials"},
+                    {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Authorization": f"Basic {basic}",
+                    },
+                )
+            )
+
+        attempts.append(
+            (
+                "password",
+                {
+                    "grant_type": "password",
+                    "username": self._username,
+                    "password": self._password,
+                    "client_id": self._client_id or "home-assistant",
+                    "client_secret": self._client_secret or "",
+                },
+                {"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        )
+
+        last_status: int | None = None
+        last_body: str = ""
+        data: dict[str, Any] | None = None
 
         try:
-            async with self._session.post(
-                url,
-                data=payload,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=aiohttp.ClientTimeout(total=SIGENERGY_API_TIMEOUT),
-            ) as resp:
-                if resp.status == 401:
-                    raise SigenergyInvalidAuth("Invalid credentials")
-                if resp.status != 200:
-                    raise SigenergyApiError(f"Authentication failed: {resp.status}")
+            for path in token_paths:
+                url = f"{self._base_url}/{path}"
+                for _name, payload, headers in attempts:
+                    async with self._session.post(
+                        url,
+                        data=payload,
+                        headers=headers,
+                        timeout=timeout,
+                    ) as resp:
+                        if resp.status != 200:
+                            last_status = resp.status
+                            last_body = (await resp.text())[:500]
+                            continue
 
-                data = await resp.json()
+                        candidate = await resp.json()
+                        if candidate.get("access_token"):
+                            data = candidate
+                            break
+                if data:
+                    break
         except aiohttp.ClientError as err:
             raise SigenergyConnectionError(str(err)) from err
+
+        if data is None:
+            if last_status in (400, 401, 403):
+                raise SigenergyInvalidAuth(
+                    f"Authentication rejected ({last_status}). Response: {last_body}"
+                )
+            raise SigenergyApiError(
+                f"Authentication failed{f' ({last_status})' if last_status else ''}."
+            )
 
         token = data.get("access_token")
         if not token:

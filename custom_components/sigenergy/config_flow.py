@@ -12,7 +12,12 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import SigenergyClient, SigenergyConnectionError, SigenergyInvalidAuth
+from .api import (
+    SigenergyApiError,
+    SigenergyClient,
+    SigenergyConnectionError,
+    SigenergyInvalidAuth,
+)
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_API_KEY,
@@ -46,6 +51,9 @@ async def validate_input(hass: HomeAssistant, user_input: dict[str, Any]) -> Non
         await client.authenticate()
         await client.get_systems()
     except SigenergyInvalidAuth as err:
+        raise InvalidAuth from err
+    except SigenergyApiError as err:
+        # Sigenergy frequently returns auth-style API errors as 403.
         raise InvalidAuth from err
     except SigenergyConnectionError as err:
         raise CannotConnect from err
